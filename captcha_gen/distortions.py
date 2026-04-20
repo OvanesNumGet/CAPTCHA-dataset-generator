@@ -11,6 +11,7 @@ import math
 import random
 
 from PIL import Image
+import numpy as np
 
 # ============================================================
 # 🌊 КОНФИГУРАЦИЯ ВОЛНЫ
@@ -26,31 +27,26 @@ WAVE_CONFIG: dict = {
 }
 
 
-def _create_valid_mask(
-    image: Image.Image, threshold: int = 8
-) -> Image.Image:
+def _create_valid_mask(image: Image.Image, threshold: int = 8) -> Image.Image:
     """
     Создаёт бинарную маску: 255 для пикселей, которые не являются
     «пустыми» (чёрными/прозрачными), и 0 для артефактов на краях.
+
+    Полностью vectorized через numpy — без Python-циклов по пикселям.
     """
+    arr = np.asarray(image)
+
     if image.mode == "RGBA":
-        # Для RGBA учитываем альфа-канал: прозрачные = невалидные
-        alpha = image.getchannel("A")
-        rgb = image.convert("RGB")
-        # Пиксель валиден, если альфа > 0 И цвет не почти чёрный
-        mask = Image.new("L", image.size, 0)
-        for y in range(image.height):
-            for x in range(image.width):
-                a = alpha.getpixel((x, y))
-                r, g, b = rgb.getpixel((x, y))
-                if a > 0 and (r > threshold or g > threshold or b > threshold):
-                    mask.putpixel((x, y), 255)
-        return mask
+        # Пиксель валиден, если альфа > 0 И хотя бы один RGB-канал > threshold
+        alpha = arr[:, :, 3]
+        rgb = arr[:, :, :3]
+        valid = (alpha > 0) & (np.any(rgb > threshold, axis=2))
     else:
-        # Для RGB: просто проверяем, что цвет не почти чёрный
-        arr = np.array(image)
-        mask_arr = (arr > threshold).any(axis=2).astype(np.uint8) * 255
-        return Image.fromarray(mask_arr, mode="L")
+        # Для RGB: просто проверяем, что хотя бы один канал > threshold
+        valid = np.any(arr > threshold, axis=2)
+
+    mask_arr = (valid.astype(np.uint8)) * 255
+    return Image.fromarray(mask_arr, mode="L")
 
 
 def apply_wave(

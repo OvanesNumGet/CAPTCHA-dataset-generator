@@ -28,7 +28,8 @@ FONT_CONFIG: dict = {
     "fallback_fonts": ("arial.ttf", "times.ttf", "DejaVuSans.ttf"),
 }
 
-_FONT_CACHE: list[Path] | None = None
+# Кеш по директории: {str(fonts_dir): list[Path]}
+_FONT_CACHE: dict[str, list[Path]] = {}
 
 
 # ============================================================
@@ -38,9 +39,9 @@ _FONT_CACHE: list[Path] | None = None
 
 def discover_fonts(fonts_dir: str | Path = DEFAULT_FONTS_DIR) -> list[Path]:
     """Рекурсивно ищет шрифты в указанной папке. Кеширует результат."""
-    global _FONT_CACHE
-    if _FONT_CACHE is not None:
-        return _FONT_CACHE
+    key = str(fonts_dir)
+    if key in _FONT_CACHE:
+        return _FONT_CACHE[key]
 
     fonts_dir = Path(fonts_dir)
     found: list[Path] = []
@@ -48,14 +49,15 @@ def discover_fonts(fonts_dir: str | Path = DEFAULT_FONTS_DIR) -> list[Path]:
         for ext in FONT_CONFIG["extensions"]:
             found.extend(fonts_dir.rglob(f"*{ext}"))
 
-    _FONT_CACHE = sorted(found)
-    return _FONT_CACHE
+    result = sorted(found)
+    _FONT_CACHE[key] = result
+    return result
 
 
 def reset_font_cache() -> None:
-    """Сбросить кеш (например, после добавления новых шрифтов)."""
+    """Сбросить кеш (например, после добавления новых шрифтов или в дочернем процессе)."""
     global _FONT_CACHE
-    _FONT_CACHE = None
+    _FONT_CACHE = {}
 
 
 # ============================================================

@@ -58,6 +58,7 @@ def cmd_generate(args: argparse.Namespace) -> None:
         split=args.split if args.split is not None else DEFAULT_VAL_SPLIT,
         fonts_dir=args.fonts_dir,
         seed=args.seed,
+        num_workers=args.workers,
     )
 
     # Для test+YOLO сразу рисуем визуализацию bbox
@@ -123,6 +124,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--seed", type=int, default=None, help="Seed для воспроизводимости"
+    )
+    p.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Количество процессов (default: auto по числу ядер)",
     )
     p.set_defaults(func=cmd_generate)
 

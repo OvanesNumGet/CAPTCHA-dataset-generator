@@ -4,11 +4,15 @@
 Объединяет модули: фон → clutter(под) → рендер текста → композит →
 clutter(сверху) → волна → letterbox → albumentations → punch_holes →
 запись на диск.
+
+Поддерживает параллельную генерацию через multiprocessing для ускорения.
 """
 
 from __future__ import annotations
 
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
+import os
 from pathlib import Path
 import random
 import uuid
@@ -45,6 +49,10 @@ GENERATOR_CONFIG: dict = {
     # Вероятности слоёв clutter (независимы друг от друга)
     "clutter_under_probability": 0.65,  # контуры ПОД текстом (на фоне)
     "clutter_over_probability": 0.65,  # контуры ПОВЕРХ текста
+    # Параллелизм: количество рабочих процессов (None = auto по числу ядер)
+    "num_workers": None,
+    # Размер батча для воркера (сколько капч генерирует один воркер за раз)
+    "worker_batch_size": 50,
 }
 
 
@@ -206,6 +214,168 @@ def _save_sample(
             f.write("\n".join(sample.yolo_lines))
 
 
+def _sample_stem(
+    sample: GeneratedSample,
+    index: int,
+    with_label: bool = True,
+    with_index: bool = False,
+) -> str:
+    """
+    Формирует имя файла.
+    - Если with_label=True: [текст]_[индекс]_[uid]
+    - Если with_label=False: [длинный_uid]
+    """
+    if not with_label:
+        # Для prod: используем полный UUID для минимизации коллизий без меток
+        return uuid.uuid4().hex[:16]
+
+    # Для test: метка + индекс + короткий хеш
+    uid = uuid.uuid4().hex[:8]
+    tag = "empty" if sample.is_empty else sample.text or "empty"
+    if with_index:
+        return f"{tag}_{index:04d}_{uid}"
+    return f"{tag}_{uid}"
+
+
+# ============================================================
+# 🔀 ПАРАЛЛЕЛЬНАЯ ГЕНЕРАЦИЯ (MULTIPROCESSING)
+# ============================================================
+
+
+def _get_num_workers() -> int:
+    """Определяет оптимальное количество рабочих процессов."""
+    configured = GENERATOR_CONFIG["num_workers"]
+    if configured is not None:
+        return max(1, configured)
+    try:
+        cpu_count = os.cpu_count() or 1
+        # Оставляем 1 ядро для ОС, но минимум 1 воркер
+        return max(1, cpu_count - 1)
+    except Exception:
+        return 1
+
+
+def _worker_generate_batch(
+    batch_size: int,
+    fonts_dir: str,
+    seed: int,
+    save_yolo: bool,
+    img_dir: str,
+    lbl_dir: str | None,
+    with_label: bool,
+    with_index: bool,
+    start_index: int,
+) -> int:
+    """
+    Функция-воркер: генерирует и сохраняет пачку капч в отдельном процессе.
+    Возвращает количество сгенерированных образцов.
+    """
+    from captcha_gen.fonts import reset_font_cache
+
+    # Сбрасываем кеш шрифтов в дочернем процессе (пути могут отличаться)
+    reset_font_cache()
+
+    gen = CaptchaGenerator(fonts_dir=fonts_dir, seed=seed)
+    img_path = Path(img_dir)
+    lbl_path = Path(lbl_dir) if lbl_dir else None
+
+    for i in range(batch_size):
+        sample = gen.generate(save_yolo=save_yolo)
+        stem = _sample_stem(
+            sample,
+            index=start_index + i,
+            with_label=with_label,
+            with_index=with_index,
+        )
+        _save_sample(sample, img_path, lbl_path, stem)
+
+    return batch_size
+
+
+def _run_split_parallel(
+    name: str,
+    count: int,
+    fonts_dir: str,
+    base_seed: int | None,
+    img_dir: Path,
+    lbl_dir: Path | None,
+    yolo: bool,
+    progress_every: int,
+) -> None:
+    """Параллельная генерация одного сплита (train или val)."""
+    num_workers = _get_num_workers()
+    batch_size = GENERATOR_CONFIG["worker_batch_size"]
+
+    # Разбиваем на задачи
+    tasks: list[tuple[int, int, int]] = []  # (batch_sz, seed, start_idx)
+    remaining = count
+    idx = 0
+    task_id = 0
+    while remaining > 0:
+        bs = min(batch_size, remaining)
+        # Каждый батч получает уникальный seed (детерминированный, если base_seed задан)
+        if base_seed is not None:
+            seed = base_seed + task_id * 100_000
+        else:
+            seed = random.randint(0, 2**31)
+        tasks.append((bs, seed, idx))
+        idx += bs
+        remaining -= bs
+        task_id += 1
+
+    if num_workers <= 1 or count <= batch_size:
+        # Однопоточный режим (малый датасет или 1 ядро)
+        done = 0
+        for bs, seed, start_idx in tasks:
+            _worker_generate_batch(
+                batch_size=bs,
+                fonts_dir=fonts_dir,
+                seed=seed,
+                save_yolo=yolo,
+                img_dir=str(img_dir),
+                lbl_dir=str(lbl_dir) if lbl_dir else None,
+                with_label=False,
+                with_index=False,
+                start_index=start_idx,
+            )
+            done += bs
+            if done % progress_every < batch_size or done == count:
+                print(f"  {name} [{done}/{count}]")
+        return
+
+    print(
+        f"  {name}: {num_workers} воркеров, {len(tasks)} задач по ~{batch_size}"
+    )
+    done = 0
+
+    with ProcessPoolExecutor(max_workers=num_workers) as pool:
+        futures = {}
+        for bs, seed, start_idx in tasks:
+            fut = pool.submit(
+                _worker_generate_batch,
+                batch_size=bs,
+                fonts_dir=fonts_dir,
+                seed=seed,
+                save_yolo=yolo,
+                img_dir=str(img_dir),
+                lbl_dir=str(lbl_dir) if lbl_dir else None,
+                with_label=False,
+                with_index=False,
+                start_index=start_idx,
+            )
+            futures[fut] = bs
+
+        for fut in as_completed(futures):
+            try:
+                n_done = fut.result()
+            except Exception as e:
+                print(f"  ⚠️ Ошибка в воркере: {e}")
+                n_done = 0
+            done += n_done
+            if done % progress_every < batch_size or done >= count:
+                print(f"  {name} [{done}/{count}]")
+
+
 def generate_dataset(
     total: int,
     output_dir: str | Path,
@@ -216,15 +386,20 @@ def generate_dataset(
     fonts_dir: str | Path = DEFAULT_FONTS_DIR,
     seed: int | None = None,
     progress_every: int = 500,
+    num_workers: int | None = None,
 ) -> None:
     """
     Сгенерировать датасет.
 
     mode == "prod"  → структура train/ val/ (+ images/labels при yolo)
     mode == "test"  → плоская папка (+ images/labels при yolo)
+
+    num_workers — количество процессов (None = автоматически по числу ядер).
     """
     output_dir = Path(output_dir)
-    gen = CaptchaGenerator(fonts_dir=fonts_dir, seed=seed)
+
+    if num_workers is not None:
+        GENERATOR_CONFIG["num_workers"] = num_workers
 
     if mode == "prod":
         n_val = int(total * split)
@@ -250,10 +425,26 @@ def generate_dataset(
         if yolo:
             print("   YOLO-аннотации включены.")
 
-        _run_split(
-            "train", n_train, gen, train_img, train_lbl, yolo, progress_every
+        _run_split_parallel(
+            "train",
+            n_train,
+            str(fonts_dir),
+            seed,
+            train_img,
+            train_lbl,
+            yolo,
+            progress_every,
         )
-        _run_split("val", n_val, gen, val_img, val_lbl, yolo, progress_every)
+        _run_split_parallel(
+            "val",
+            n_val,
+            str(fonts_dir),
+            (seed + 999_999_999) if seed is not None else None,
+            val_img,
+            val_lbl,
+            yolo,
+            progress_every,
+        )
 
         print(f"✅ Готово! Данные сохранены в {output_dir.absolute()}")
     else:
@@ -267,55 +458,14 @@ def generate_dataset(
             f"🧪 Генерация {total} тестовых изображений → {output_dir}"
             + (" (YOLO)" if yolo else "")
         )
+
+        # Тестовый режим: последовательно, с лейблами в именах
+        gen = CaptchaGenerator(fonts_dir=fonts_dir, seed=seed)
         for i in range(total):
             sample = gen.generate(save_yolo=yolo)
-            # Для test режима оставляем расшифровку в названии
             stem = _sample_stem(
                 sample, index=i, with_label=True, with_index=True
             )
             _save_sample(sample, img_dir, lbl_dir, stem)
             print(f"  [{i + 1}/{total}] {stem}.png")
         print(f"✅ Готово! → {output_dir.absolute()}")
-
-
-def _run_split(
-    name: str,
-    count: int,
-    gen: CaptchaGenerator,
-    img_dir: Path,
-    lbl_dir: Path | None,
-    yolo: bool,
-    progress_every: int,
-) -> None:
-    for i in range(count):
-        sample = gen.generate(save_yolo=yolo)
-        # В prod режиме НЕ используем расшифровку в названии (только UUID)
-        stem = _sample_stem(
-            sample, index=i, with_label=False, with_index=False
-        )
-        _save_sample(sample, img_dir, lbl_dir, stem)
-        if (i + 1) % progress_every == 0:
-            print(f"  {name} [{i + 1}/{count}]")
-
-
-def _sample_stem(
-    sample: GeneratedSample,
-    index: int,
-    with_label: bool = True,
-    with_index: bool = False,
-) -> str:
-    """
-    Формирует имя файла.
-    - Если with_label=True: [текст]_[индекс]_[uid]
-    - Если with_label=False: [длинный_uid]
-    """
-    if not with_label:
-        # Для prod: используем полный UUID для минимизации коллизий без меток
-        return uuid.uuid4().hex[:16]
-
-    # Для test: метка + индекс + короткий хеш
-    uid = uuid.uuid4().hex[:8]
-    tag = "empty" if sample.is_empty else sample.text or "empty"
-    if with_index:
-        return f"{tag}_{index:04d}_{uid}"
-    return f"{tag}_{uid}"

@@ -66,6 +66,12 @@ def _discover_photos() -> list[Path]:
     return _PHOTO_CACHE
 
 
+def reset_photo_cache() -> None:
+    """Сбросить кеш фотографий (для multiprocessing)."""
+    global _PHOTO_CACHE
+    _PHOTO_CACHE = None
+
+
 # ============================================================
 # 🎨 ГЕНЕРАТОРЫ
 # ============================================================

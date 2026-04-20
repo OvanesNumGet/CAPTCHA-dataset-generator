@@ -18,6 +18,7 @@ import math
 import random
 
 from PIL import Image, ImageDraw
+import numpy as np
 
 # ============================================================
 # 🧩 КОНФИГУРАЦИЯ МУСОРА
@@ -219,25 +220,19 @@ def draw_clutter(
 def _sample_bg_color(
     image: Image.Image, rng: random.Random
 ) -> tuple[int, int, int]:
-    """Берём среднее по краям — аппроксимация цвета фона."""
+    """Берём среднее по краям — аппроксимация цвета фона. Vectorized через numpy."""
     w, h = image.size
-    rgb = image.convert("RGB")
-    # несколько случайных точек с края
-    samples = []
-    for _ in range(12):
-        side = rng.choice(["top", "bottom", "left", "right"])
-        if side == "top":
-            samples.append(rgb.getpixel((rng.randint(0, w - 1), 0)))
-        elif side == "bottom":
-            samples.append(rgb.getpixel((rng.randint(0, w - 1), h - 1)))
-        elif side == "left":
-            samples.append(rgb.getpixel((0, rng.randint(0, h - 1))))
-        else:
-            samples.append(rgb.getpixel((w - 1, rng.randint(0, h - 1))))
-    rr = sum(s[0] for s in samples) // len(samples)
-    gg = sum(s[1] for s in samples) // len(samples)
-    bb = sum(s[2] for s in samples) // len(samples)
-    return (rr, gg, bb)
+    arr = np.asarray(image.convert("RGB"))
+
+    # Собираем все пиксели с краёв одним срезом
+    top = arr[0, :, :]  # (w, 3)
+    bottom = arr[h - 1, :, :]  # (w, 3)
+    left = arr[:, 0, :]  # (h, 3)
+    right = arr[:, w - 1, :]  # (h, 3)
+
+    edges = np.concatenate([top, bottom, left, right], axis=0)  # (2w+2h, 3)
+    mean = edges.mean(axis=0)
+    return (int(mean[0]), int(mean[1]), int(mean[2]))
 
 
 def _draw_single_hole(

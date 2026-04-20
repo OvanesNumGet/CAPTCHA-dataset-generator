@@ -77,17 +77,26 @@ AUGMENTATION_CONFIG: dict = {
 
 
 # ============================================================
-# 🏗 СБОРКА ПАЙПЛАЙНА
+# 🏗 СБОРКА ПАЙПЛАЙНА (С КЕШИРОВАНИЕМ)
 # ============================================================
+
+# Кеш пайплайнов: создаём один раз, переиспользуем на все вызовы.
+_PIPELINE_CACHE: dict[bool, Any] = {}
 
 
 def build_pipeline(with_bboxes: bool = False) -> Any:
     """
     Возвращает скомпилированный Albumentations Compose.
     Если Albumentations не установлен — возвращает no-op объект.
+
+    Результат кешируется — повторные вызовы с тем же with_bboxes
+    возвращают тот же объект без пересоздания.
     """
     if not (_HAS_ALBU and AUGMENTATION_CONFIG["enabled"]):
         return _NoOpPipeline()
+
+    if with_bboxes in _PIPELINE_CACHE:
+        return _PIPELINE_CACHE[with_bboxes]
 
     cfg = AUGMENTATION_CONFIG
 
@@ -142,7 +151,7 @@ def build_pipeline(with_bboxes: bool = False) -> Any:
     ]
 
     if with_bboxes:
-        return A.Compose(
+        pipeline = A.Compose(
             transforms,
             bbox_params=A.BboxParams(
                 format="yolo",
@@ -150,8 +159,11 @@ def build_pipeline(with_bboxes: bool = False) -> Any:
                 min_visibility=0.25,
             ),
         )
+    else:
+        pipeline = A.Compose(transforms)
 
-    return A.Compose(transforms)
+    _PIPELINE_CACHE[with_bboxes] = pipeline
+    return pipeline
 
 
 class _NoOpPipeline:

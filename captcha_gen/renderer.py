@@ -14,6 +14,7 @@ from __future__ import annotations
 import random
 
 from PIL import Image, ImageDraw, ImageFont
+import numpy as np
 
 from captcha_gen.fonts import random_font
 
@@ -83,9 +84,10 @@ def _font_supports_filled(font: ImageFont.FreeTypeFont) -> bool:
         if w == 0 or h == 0:
             _FILLED_SUPPORT_CACHE[key] = False
             return False
-        # mask — это 'L' изображение: считаем долю ненулевых пикселей
+        # Конвертируем маску в numpy-массив для быстрого подсчёта
+        mask_arr = np.frombuffer(mask, dtype=np.uint8).reshape((h, w))
         total = w * h
-        non_zero = sum(1 for px in mask if px > 32)
+        non_zero = int(np.count_nonzero(mask_arr > 32))
         density = non_zero / total if total else 0.0
         ok = density >= RENDER_CONFIG["filled_min_glyph_density"]
     except Exception:

@@ -5,13 +5,12 @@
 """
 
 from __future__ import annotations
+
 import argparse
 import json
 from pathlib import Path
 import sys
-from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-import time
 
 # Константы для поиска
 GITHUB_RAW = "https://raw.githubusercontent.com/google/fonts"
@@ -21,30 +20,51 @@ GITHUB_API = "https://api.github.com/repos/google/fonts/contents"
 # Имена файлов с [] нужно URL-кодировать: [ -> %5B, ] -> %5D, , -> %2C
 FONTS_TO_GET = [
     # Roboto — вариативный, нет static-версии; wdth=100,wght=400 => Regular, wght=700 => Bold
-    ("Roboto-Regular.ttf",          "roboto",           "Roboto%5Bwdth%2Cwght%5D.ttf"),
-    ("Roboto-Bold.ttf",             "roboto",           "Roboto%5Bwdth%2Cwght%5D.ttf"),   # тот же файл, variable font
-    ("RobotoMono-Regular.ttf",      "robotomono",       "RobotoMono%5Bwght%5D.ttf"),
-    ("OpenSans-Regular.ttf",        "opensans",         "OpenSans%5Bwdth%2Cwght%5D.ttf"),
-    ("Lato-Regular.ttf",            "lato",             "Lato-Regular.ttf"),
-    ("Lato-Bold.ttf",               "lato",             "Lato-Bold.ttf"),
-    ("Montserrat-Regular.ttf",      "montserrat",       "Montserrat%5Bwght%5D.ttf"),
-    ("Poppins-Regular.ttf",         "poppins",          "Poppins-Regular.ttf"),
-    ("Poppins-Bold.ttf",            "poppins",          "Poppins-Bold.ttf"),
-    ("Inter-Regular.ttf",           "inter",            "Inter%5Bopsz%2Cwght%5D.ttf"),
-    ("Ubuntu-Regular.ttf",          "ubuntu",           "Ubuntu-Regular.ttf"),
-    ("PTSans-Regular.ttf",          "ptsans",           "PT_Sans-Web-Regular.ttf"),
-    ("Merriweather-Regular.ttf",    "merriweather",     "Merriweather%5Bopsz%2Cwdth%2Cwght%5D.ttf"),
-    ("Merriweather-Bold.ttf",       "merriweather",     "Merriweather%5Bopsz%2Cwdth%2Cwght%5D.ttf"),  # тот же файл
-    ("PTSerif-Regular.ttf",         "ptserif",          "PT_Serif-Web-Regular.ttf"),
-    ("LibreBaskerville-Regular.ttf","librebaskerville",  "LibreBaskerville%5Bwght%5D.ttf"),
-    ("CrimsonText-Regular.ttf",     "crimsontext",      "CrimsonText-Regular.ttf"),
-    ("Arvo-Regular.ttf",            "arvo",             "Arvo-Regular.ttf"),
-    ("Oswald-Regular.ttf",          "oswald",           "Oswald%5Bwght%5D.ttf"),
-    ("Anton-Regular.ttf",           "anton",            "Anton-Regular.ttf"),
-    ("BebasNeue-Regular.ttf",       "bebasneue",        "BebasNeue-Regular.ttf"),
-    ("SpaceMono-Regular.ttf",       "spacemono",        "SpaceMono-Regular.ttf"),
-    ("Inconsolata-Regular.ttf",     "inconsolata",      "Inconsolata%5Bwdth%2Cwght%5D.ttf"),
+    ("Roboto-Regular.ttf", "roboto", "Roboto%5Bwdth%2Cwght%5D.ttf"),
+    (
+        "Roboto-Bold.ttf",
+        "roboto",
+        "Roboto%5Bwdth%2Cwght%5D.ttf",
+    ),  # тот же файл, variable font
+    ("RobotoMono-Regular.ttf", "robotomono", "RobotoMono%5Bwght%5D.ttf"),
+    ("OpenSans-Regular.ttf", "opensans", "OpenSans%5Bwdth%2Cwght%5D.ttf"),
+    ("Lato-Regular.ttf", "lato", "Lato-Regular.ttf"),
+    ("Lato-Bold.ttf", "lato", "Lato-Bold.ttf"),
+    ("Montserrat-Regular.ttf", "montserrat", "Montserrat%5Bwght%5D.ttf"),
+    ("Poppins-Regular.ttf", "poppins", "Poppins-Regular.ttf"),
+    ("Poppins-Bold.ttf", "poppins", "Poppins-Bold.ttf"),
+    ("Inter-Regular.ttf", "inter", "Inter%5Bopsz%2Cwght%5D.ttf"),
+    ("Ubuntu-Regular.ttf", "ubuntu", "Ubuntu-Regular.ttf"),
+    ("PTSans-Regular.ttf", "ptsans", "PT_Sans-Web-Regular.ttf"),
+    (
+        "Merriweather-Regular.ttf",
+        "merriweather",
+        "Merriweather%5Bopsz%2Cwdth%2Cwght%5D.ttf",
+    ),
+    (
+        "Merriweather-Bold.ttf",
+        "merriweather",
+        "Merriweather%5Bopsz%2Cwdth%2Cwght%5D.ttf",
+    ),  # тот же файл
+    ("PTSerif-Regular.ttf", "ptserif", "PT_Serif-Web-Regular.ttf"),
+    (
+        "LibreBaskerville-Regular.ttf",
+        "librebaskerville",
+        "LibreBaskerville%5Bwght%5D.ttf",
+    ),
+    ("CrimsonText-Regular.ttf", "crimsontext", "CrimsonText-Regular.ttf"),
+    ("Arvo-Regular.ttf", "arvo", "Arvo-Regular.ttf"),
+    ("Oswald-Regular.ttf", "oswald", "Oswald%5Bwght%5D.ttf"),
+    ("Anton-Regular.ttf", "anton", "Anton-Regular.ttf"),
+    ("BebasNeue-Regular.ttf", "bebasneue", "BebasNeue-Regular.ttf"),
+    ("SpaceMono-Regular.ttf", "spacemono", "SpaceMono-Regular.ttf"),
+    (
+        "Inconsolata-Regular.ttf",
+        "inconsolata",
+        "Inconsolata%5Bwdth%2Cwght%5D.ttf",
+    ),
 ]
+
 
 def get_directory_listing(family_path: str) -> list[str]:
     """Пытается получить список файлов в папке через API GitHub."""
@@ -53,9 +73,10 @@ def get_directory_listing(family_path: str) -> list[str]:
     try:
         with urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read())
-            return [item['name'] for item in data]
+            return [item["name"] for item in data]
     except:
         return []
+
 
 def download_file(url: str) -> bytes | None:
     req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -65,7 +86,10 @@ def download_file(url: str) -> bytes | None:
     except:
         return None
 
-def smart_find_and_download(family: str, filename: str) -> tuple[bytes | None, str]:
+
+def smart_find_and_download(
+    family: str, filename: str
+) -> tuple[bytes | None, str]:
     """Пробует разные комбинации путей для поиска шрифта."""
     branches = ["main", "master"]
     licenses = ["ofl", "apache", "ufl"]
@@ -87,20 +111,23 @@ def smart_find_and_download(family: str, filename: str) -> tuple[bytes | None, s
 
     return None, ""
 
+
 def main(argv: list[str] | None = None) -> int:
     """
     Main entry point. Accepts optional argv for programmatic use.
-    
+
     Args:
         argv: List of command-line arguments (like sys.argv[1:]).
               If None, uses sys.argv[1:] automatically.
-    
+
     Returns:
         Exit code: 0 on success, 1 on failure.
     """
     parser = argparse.ArgumentParser()
     parser.add_argument("--dest", default="fonts")
-    args = parser.parse_args(argv)  # Accept explicit argv for notebook compatibility
+    args = parser.parse_args(
+        argv
+    )  # Accept explicit argv for notebook compatibility
 
     dest_dir = Path(args.dest)
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -115,13 +142,17 @@ def main(argv: list[str] | None = None) -> int:
     failed = []
 
     for i, (save_name, family, remote_name) in enumerate(FONTS_TO_GET, 1):
-        print(f"[{i}/{len(FONTS_TO_GET)}] Поиск {family} ({save_name})...", end="", flush=True)
+        print(
+            f"[{i}/{len(FONTS_TO_GET)}] Поиск {family} ({save_name})...",
+            end="",
+            flush=True,
+        )
 
         target = dest_dir / save_name
 
         # Если файл уже существует (например, Bold — та же variable font что и Regular) — не качаем повторно
         if target.exists() and target.stat().st_size > 2000:
-            print(f" ⏭ Уже есть (пропуск)")
+            print(" ⏭ Уже есть (пропуск)")
             success += 1
             continue
 
@@ -132,7 +163,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f" ✅ Найдено! ({found_url})")
             success += 1
         else:
-            print(f" ❌ НЕ НАЙДЕНО")
+            print(" ❌ НЕ НАЙДЕНО")
             failed.append(save_name)
             # Пытаемся понять, что там вообще есть
             with open(log_file, "a", encoding="utf-8") as f:
@@ -141,7 +172,9 @@ def main(argv: list[str] | None = None) -> int:
                 for lic in ["ofl", "apache"]:
                     listing = get_directory_listing(f"{lic}/{family}")
                     if listing:
-                        f.write(f"Содержимое {lic}/{family}: {', '.join(listing)}\n")
+                        f.write(
+                            f"Содержимое {lic}/{family}: {", ".join(listing)}\n"
+                        )
                 f.write("\n")
 
     print("\n" + "=" * 40)
@@ -150,11 +183,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"❌ Не удалось найти: {len(failed)}")
         for name in failed:
             print(f"   - {name}")
-        print(f"Список доступных файлов в проблемных папках сохранен в: {log_file.absolute()}")
+        print(
+            f"Список доступных файлов в проблемных папках сохранен в: {log_file.absolute()}"
+        )
     else:
         print("Все шрифты загружены успешно!")
 
     return 0 if not failed else 1
+
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -18,6 +18,7 @@ dataset/
 
 # Output
 success_accounts.txt
+*.pt
 
 # IDE
 .idea/
@@ -26,3 +27,4 @@ success_accounts.txt
 
 fonts
 *.ttf
+parser

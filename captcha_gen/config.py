@@ -18,11 +18,11 @@ CAPTCHA_CONFIG: dict = {
     # Алфавит: цифры + латиница (верхний и нижний регистр)
     "charset": string.ascii_letters + string.digits,
     # Длина текста
-    "min_length": 4,
-    "max_length": 7,
+    "min_length": 3,
+    "max_length": 9,
     # Итоговый размер изображения (после letterbox)
-    "width": 200,
-    "height": 90,
+    "width": 224,
+    "height": 96,
     # Веса выбора типа символа в generate_random_text()
     "char_type_weights": {
         "upper": 0.45,
