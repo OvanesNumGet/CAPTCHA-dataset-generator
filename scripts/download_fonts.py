@@ -1,230 +1,150 @@
 """
-Скачивает кураторскую подборку шрифтов Google Fonts в папку fonts/.
-
-Использование:
-    python scripts/download_fonts.py
-    python scripts/download_fonts.py --dest fonts --force
-
-Все шрифты — под свободными лицензиями (OFL / Apache), берутся из
-официального репозитория https://github.com/google/fonts.
+Умный загрузчик шрифтов Google Fonts.
+Автоматически находит пути к файлам, перебирая возможные структуры репозитория.
+Сохраняет отчет о доступных файлах при ошибках.
 """
 
 from __future__ import annotations
-
 import argparse
+import json
 from pathlib import Path
 import sys
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+import time
 
-# ============================================================
-# 📚 СПИСОК ШРИФТОВ
-# Микс: читаемые sans/serif + характерные display + рукописные.
-# Все ссылки — на master ветку google/fonts.
-# ============================================================
+# Константы для поиска
+GITHUB_RAW = "https://raw.githubusercontent.com/google/fonts"
+GITHUB_API = "https://api.github.com/repos/google/fonts/contents"
 
-GITHUB_RAW = "https://raw.githubusercontent.com/google/fonts/main"
-
-FONTS: list[tuple[str, str]] = [
-    # --- Классические sans (для фона читаемости) ---
-    # ("Roboto-Regular.ttf", f"{GITHUB_RAW}/apache/roboto/static/Roboto-Regular.ttf"),
-    # ("Roboto-Bold.ttf",    f"{GITHUB_RAW}/apache/roboto/static/Roboto-Bold.ttf"),
-    (
-        "OpenSans-Regular.ttf",
-        f"{GITHUB_RAW}/ofl/opensans/OpenSans%5Bwdth%2Cwght%5D.ttf",
-    ),
-    ("Lato-Regular.ttf", f"{GITHUB_RAW}/ofl/lato/Lato-Regular.ttf"),
-    ("Lato-Bold.ttf", f"{GITHUB_RAW}/ofl/lato/Lato-Bold.ttf"),
-    (
-        "Montserrat-Regular.ttf",
-        f"{GITHUB_RAW}/ofl/montserrat/Montserrat%5Bwght%5D.ttf",
-    ),
-    ("Poppins-Regular.ttf", f"{GITHUB_RAW}/ofl/poppins/Poppins-Regular.ttf"),
-    ("Poppins-Bold.ttf", f"{GITHUB_RAW}/ofl/poppins/Poppins-Bold.ttf"),
-    (
-        "Inter-Regular.ttf",
-        f"{GITHUB_RAW}/ofl/inter/Inter%5Bopsz%2Cwght%5D.ttf",
-    ),
-    # --- Дополнительные качественные Sans-Serif ---
-    ("Nunito-Regular.ttf", f"{GITHUB_RAW}/ofl/nunito/Nunito%5Bwght%5D.ttf"),
-    # ("Ubuntu-Regular.ttf",    f"{GITHUB_RAW}/ofl/ubuntu/Ubuntu-Regular.ttf"),
-    (
-        "FiraSans-Regular.ttf",
-        f"{GITHUB_RAW}/ofl/firasans/FiraSans-Regular.ttf",
-    ),
-    (
-        "WorkSans-Regular.ttf",
-        f"{GITHUB_RAW}/ofl/worksans/WorkSans%5Bwght%5D.ttf",
-    ),
-    (
-        "NotoSans-Regular.ttf",
-        f"{GITHUB_RAW}/ofl/notosans/NotoSans%5Bwdth%2Cwght%5D.ttf",
-    ),
-    # ("PTSans-Regular.ttf",    f"{GITHUB_RAW}/ofl/ptsans/PTSans-Regular.ttf"),
-    (
-        "SourceSans3-Regular.ttf",
-        f"{GITHUB_RAW}/ofl/sourcesans3/SourceSans3%5Bwght%5D.ttf",
-    ),
-    # --- Serif ---
-    (
-        "PlayfairDisplay-Regular.ttf",
-        f"{GITHUB_RAW}/ofl/playfairdisplay/PlayfairDisplay%5Bwght%5D.ttf",
-    ),
-    # ("Merriweather-Regular.ttf",    f"{GITHUB_RAW}/ofl/merriweather/Merriweather-Regular.ttf"),
-    # ("Merriweather-Bold.ttf",       f"{GITHUB_RAW}/ofl/merriweather/Merriweather-Bold.ttf"),
-    (
-        "RobotoSlab-Regular.ttf",
-        f"{GITHUB_RAW}/apache/robotoslab/RobotoSlab%5Bwght%5D.ttf",
-    ),
-    ("Lora-Regular.ttf", f"{GITHUB_RAW}/ofl/lora/Lora%5Bwght%5D.ttf"),
-    # ("PTSerif-Regular.ttf",         f"{GITHUB_RAW}/ofl/ptserif/PTSerif-Regular.ttf"),
-    # ("LibreBaskerville-Regular.ttf", f"{GITHUB_RAW}/ofl/librebaskerville/LibreBaskerville-Regular.ttf"),
-    (
-        "CrimsonText-Regular.ttf",
-        f"{GITHUB_RAW}/ofl/crimsontext/CrimsonText-Regular.ttf",
-    ),
-    # --- Жирные и плотные (хорошо для filled) ---
-    ("Oswald-Regular.ttf", f"{GITHUB_RAW}/ofl/oswald/Oswald%5Bwght%5D.ttf"),
-    ("Anton-Regular.ttf", f"{GITHUB_RAW}/ofl/anton/Anton-Regular.ttf"),
-    (
-        "BebasNeue-Regular.ttf",
-        f"{GITHUB_RAW}/ofl/bebasneue/BebasNeue-Regular.ttf",
-    ),
-    ("Bungee-Regular.ttf", f"{GITHUB_RAW}/ofl/bungee/Bungee-Regular.ttf"),
-    # --- Характерные display ---
-    ("Lobster-Regular.ttf", f"{GITHUB_RAW}/ofl/lobster/Lobster-Regular.ttf"),
-    (
-        "Righteous-Regular.ttf",
-        f"{GITHUB_RAW}/ofl/righteous/Righteous-Regular.ttf",
-    ),
-    (
-        "PressStart2P-Regular.ttf",
-        f"{GITHUB_RAW}/ofl/pressstart2p/PressStart2P-Regular.ttf",
-    ),
-    ("Monoton-Regular.ttf", f"{GITHUB_RAW}/ofl/monoton/Monoton-Regular.ttf"),
-    # --- Mono ---
-    # ("RobotoMono-Regular.ttf", f"{GITHUB_RAW}/apache/robotomono/static/RobotoMono-Regular.ttf"),
-    (
-        "SpaceMono-Regular.ttf",
-        f"{GITHUB_RAW}/ofl/spacemono/SpaceMono-Regular.ttf",
-    ),
-    # --- Рукописные / handwritten ---
-    ("Caveat-Regular.ttf", f"{GITHUB_RAW}/ofl/caveat/Caveat%5Bwght%5D.ttf"),
-    (
-        "IndieFlower-Regular.ttf",
-        f"{GITHUB_RAW}/ofl/indieflower/IndieFlower-Regular.ttf",
-    ),
-    (
-        "PatrickHand-Regular.ttf",
-        f"{GITHUB_RAW}/ofl/patrickhand/PatrickHand-Regular.ttf",
-    ),
-    (
-        "ShadowsIntoLight-Regular.ttf",
-        f"{GITHUB_RAW}/ofl/shadowsintolight/ShadowsIntoLight.ttf",
-    ),
+# Список шрифтов: (Имя файла для сохранения, Семья в репозитории, Желаемое имя в репозитории)
+# Имена файлов с [] нужно URL-кодировать: [ -> %5B, ] -> %5D, , -> %2C
+FONTS_TO_GET = [
+    # Roboto — вариативный, нет static-версии; wdth=100,wght=400 => Regular, wght=700 => Bold
+    ("Roboto-Regular.ttf",          "roboto",           "Roboto%5Bwdth%2Cwght%5D.ttf"),
+    ("Roboto-Bold.ttf",             "roboto",           "Roboto%5Bwdth%2Cwght%5D.ttf"),   # тот же файл, variable font
+    ("RobotoMono-Regular.ttf",      "robotomono",       "RobotoMono%5Bwght%5D.ttf"),
+    ("OpenSans-Regular.ttf",        "opensans",         "OpenSans%5Bwdth%2Cwght%5D.ttf"),
+    ("Lato-Regular.ttf",            "lato",             "Lato-Regular.ttf"),
+    ("Lato-Bold.ttf",               "lato",             "Lato-Bold.ttf"),
+    ("Montserrat-Regular.ttf",      "montserrat",       "Montserrat%5Bwght%5D.ttf"),
+    ("Poppins-Regular.ttf",         "poppins",          "Poppins-Regular.ttf"),
+    ("Poppins-Bold.ttf",            "poppins",          "Poppins-Bold.ttf"),
+    ("Inter-Regular.ttf",           "inter",            "Inter%5Bopsz%2Cwght%5D.ttf"),
+    ("Ubuntu-Regular.ttf",          "ubuntu",           "Ubuntu-Regular.ttf"),
+    ("PTSans-Regular.ttf",          "ptsans",           "PT_Sans-Web-Regular.ttf"),
+    ("Merriweather-Regular.ttf",    "merriweather",     "Merriweather%5Bopsz%2Cwdth%2Cwght%5D.ttf"),
+    ("Merriweather-Bold.ttf",       "merriweather",     "Merriweather%5Bopsz%2Cwdth%2Cwght%5D.ttf"),  # тот же файл
+    ("PTSerif-Regular.ttf",         "ptserif",          "PT_Serif-Web-Regular.ttf"),
+    ("LibreBaskerville-Regular.ttf","librebaskerville",  "LibreBaskerville%5Bwght%5D.ttf"),
+    ("CrimsonText-Regular.ttf",     "crimsontext",      "CrimsonText-Regular.ttf"),
+    ("Arvo-Regular.ttf",            "arvo",             "Arvo-Regular.ttf"),
+    ("Oswald-Regular.ttf",          "oswald",           "Oswald%5Bwght%5D.ttf"),
+    ("Anton-Regular.ttf",           "anton",            "Anton-Regular.ttf"),
+    ("BebasNeue-Regular.ttf",       "bebasneue",        "BebasNeue-Regular.ttf"),
+    ("SpaceMono-Regular.ttf",       "spacemono",        "SpaceMono-Regular.ttf"),
+    ("Inconsolata-Regular.ttf",     "inconsolata",      "Inconsolata%5Bwdth%2Cwght%5D.ttf"),
 ]
 
-
-# ============================================================
-# ⬇️ DOWNLOADER
-# ============================================================
-
-
-def _download_one(url: str, dest: Path, timeout: int = 30) -> bool:
-    """Скачивает один файл. Возвращает True при успехе."""
-    req = Request(
-        url, headers={"User-Agent": "captcha-gen-font-downloader/1.0"}
-    )
+def get_directory_listing(family_path: str) -> list[str]:
+    """Пытается получить список файлов в папке через API GitHub."""
+    url = f"{GITHUB_API}/{family_path}"
+    req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
     try:
-        with urlopen(req, timeout=timeout) as resp:
-            data = resp.read()
-    except (HTTPError, URLError, TimeoutError) as e:
-        print(f"   ❌ ошибка: {e}")
-        return False
+        with urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+            return [item['name'] for item in data]
+    except:
+        return []
 
-    if len(data) < 2_000:
-        print(f"   ❌ подозрительно маленький файл ({len(data)} байт)")
-        return False
-
-    dest.write_bytes(data)
-    return True
-
-
-def _verify_font(path: Path) -> bool:
-    """Проверяем, что PIL может открыть шрифт."""
+def download_file(url: str) -> bytes | None:
+    req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
     try:
-        from PIL import ImageFont
+        with urlopen(req, timeout=15) as resp:
+            return resp.read()
+    except:
+        return None
 
-        ImageFont.truetype(str(path), 32)
-        return True
-    except Exception as e:
-        print(f"   ⚠️ файл не открывается как шрифт: {e}")
-        return False
+def smart_find_and_download(family: str, filename: str) -> tuple[bytes | None, str]:
+    """Пробует разные комбинации путей для поиска шрифта."""
+    branches = ["main", "master"]
+    licenses = ["ofl", "apache", "ufl"]
+    subdirs = ["static", ""]  # Сначала ищем в static, потом в корне
 
+    for branch in branches:
+        for lic in licenses:
+            for subdir in subdirs:
+                path_parts = [lic, family]
+                if subdir:
+                    path_parts.append(subdir)
 
-def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Скачивание подборки шрифтов Google Fonts для генератора капч."
-    )
-    parser.add_argument(
-        "--dest",
-        default="fonts",
-        help="Папка назначения (по умолчанию: fonts)",
-    )
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Перекачать даже если файл уже существует.",
-    )
+                path = "/".join(path_parts)
+                url = f"{GITHUB_RAW}/{branch}/{path}/{filename}"
+
+                data = download_file(url)
+                if data and len(data) > 2000:
+                    return data, url
+
+    return None, ""
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dest", default="fonts")
     args = parser.parse_args()
 
     dest_dir = Path(args.dest)
     dest_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"📁 Папка назначения: {dest_dir.absolute()}")
-    print(f"📦 Файлов к загрузке: {len(FONTS)}\n")
+    log_file = Path("available_files_log.txt")
+    with open(log_file, "w", encoding="utf-8") as f:
+        f.write("=== ОТЧЕТ ПО ПОИСКУ ШРИФТОВ ===\n\n")
 
-    ok = 0
-    skipped = 0
-    failed: list[str] = []
+    print(f"Начинаю умную загрузку в {dest_dir.absolute()}")
 
-    for idx, (name, url) in enumerate(FONTS, start=1):
-        target = dest_dir / name
-        print(f"[{idx}/{len(FONTS)}] {name}")
+    success = 0
+    failed = []
 
-        if target.exists() and not args.force:
-            if _verify_font(target):
-                print("   ✔ уже есть, пропускаю")
-                skipped += 1
-                continue
-            print("   ⚠ битый файл, перекачиваю")
-            target.unlink(missing_ok=True)
+    for i, (save_name, family, remote_name) in enumerate(FONTS_TO_GET, 1):
+        print(f"[{i}/{len(FONTS_TO_GET)}] Поиск {family} ({save_name})...", end="", flush=True)
 
-        if _download_one(url, target):
-            if _verify_font(target):
-                print(f"   ✅ {target.stat().st_size // 1024} КБ")
-                ok += 1
-            else:
-                target.unlink(missing_ok=True)
-                failed.append(name)
+        target = dest_dir / save_name
+
+        # Если файл уже существует (например, Bold — та же variable font что и Regular) — не качаем повторно
+        if target.exists() and target.stat().st_size > 2000:
+            print(f" ⏭ Уже есть (пропуск)")
+            success += 1
+            continue
+
+        data, found_url = smart_find_and_download(family, remote_name)
+
+        if data:
+            target.write_bytes(data)
+            print(f" ✅ Найдено! ({found_url})")
+            success += 1
         else:
-            failed.append(name)
+            print(f" ❌ НЕ НАЙДЕНО")
+            failed.append(save_name)
+            # Пытаемся понять, что там вообще есть
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(f"--- Ошибка: {save_name} (семья: {family}) ---\n")
+                f.write(f"Пробовал искать: {remote_name}\n")
+                for lic in ["ofl", "apache"]:
+                    listing = get_directory_listing(f"{lic}/{family}")
+                    if listing:
+                        f.write(f"Содержимое {lic}/{family}: {', '.join(listing)}\n")
+                f.write("\n")
 
-    print("\n────────────────────────────────────")
-    print(f"✅ Скачано: {ok}")
-    print(f"⏭  Пропущено (уже было): {skipped}")
+    print("\n" + "=" * 40)
+    print(f"✅ Успешно скачано: {success}")
     if failed:
-        print(f"❌ Не удалось: {len(failed)}")
+        print(f"❌ Не удалось найти: {len(failed)}")
         for name in failed:
-            print(f"   • {name}")
-        print(
-            "\nПодсказка: если что-то из Google Fonts переехало, "
-            "посмотрите актуальный путь в репозитории "
-            "https://github.com/google/fonts и поправьте список."
-        )
-        return 1
-    return 0
+            print(f"   - {name}")
+        print(f"Список доступных файлов в проблемных папках сохранен в: {log_file.absolute()}")
+    else:
+        print("Все шрифты загружены успешно!")
 
+    return 0 if not failed else 1
 
 if __name__ == "__main__":
     sys.exit(main())

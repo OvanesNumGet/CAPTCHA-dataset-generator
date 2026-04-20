@@ -26,7 +26,7 @@ from PIL import Image, ImageDraw
 CLUTTER_CONFIG: dict = {
     # ---------------- SHAPES (контуры) ----------------
     # Общая вероятность вообще что-то нарисовать
-    "apply_probability": 0.85,
+    "apply_probability": 0.70,
     # Сколько мусорных элементов рисовать за раз
     "count_range": (0, 5),
     # Доля элементов, раскрашенных в цвет текста (остальные — случайные)
@@ -43,13 +43,13 @@ CLUTTER_CONFIG: dict = {
         "arc": 0.07,
     },
     # Параметры конкретных фигур
-    "line_length_frac_range": (0.25, 1.15),  # относительно max(w,h)
-    "polyline_segments_range": (2, 5),
-    "circle_radius_frac_range": (0.05, 0.45),  # относительно min(w,h)
-    "rect_size_frac_range": (0.1, 0.7),
-    "polygon_vertices_range": (3, 6),
-    "polygon_radius_frac_range": (0.08, 0.35),
-    "arc_radius_frac_range": (0.08, 0.5),
+    "line_length_frac_range": (0.0, 1.15),  # относительно max(w,h)
+    "polyline_segments_range": (0, 5),
+    "circle_radius_frac_range": (0.0, 0.45),  # относительно min(w,h)
+    "rect_size_frac_range": (0.0, 0.7),
+    "polygon_vertices_range": (1, 6),
+    "polygon_radius_frac_range": (0.0, 0.35),
+    "arc_radius_frac_range": (0.0, 0.5),
     # ---------------- PUNCH HOLES ----------------
     # Вероятность вообще применить дырки
     "holes_apply_probability": 0.40,
@@ -57,7 +57,7 @@ CLUTTER_CONFIG: dict = {
     "holes_count_range": (0, 14),
     # Размер одной дырки в пикселях (radius-like).
     # Держим маленьким, иначе капча превращается в решето.
-    "hole_radius_range": (1, 4),
+    "hole_radius_range": (0, 4),
     # Шанс, что дырка будет не круглой, а «кляксой» из нескольких точек
     "hole_blob_probability": 0.35,
     # Доля дырок, залитых цветом фона (остальные — белые/чёрные случайные).

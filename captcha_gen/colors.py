@@ -1,9 +1,9 @@
 """
 Цветовые палитры для капч.
 
-Цель — уйти от фиксированного фиолетового и генерировать полностью
-случайные, но «читаемые» пары цветов (фон / текст) с гарантированным
-контрастом. Часть капч рендерится в grayscale для разнообразия.
+Цель — генерировать всевозможные стили: пастельные, неоновые, тёмные,
+тусклые, контрастные, монохромные. Гарантируется читаемость с помощью
+WCAG contrast ratio, но порог снижен для создания сложных для ИИ капч.
 """
 
 from __future__ import annotations
@@ -16,23 +16,14 @@ import random
 # ============================================================
 
 COLOR_CONFIG: dict = {
-    # Вероятность рендера полностью в grayscale
-    "grayscale_probability": 0.20,
-    # Минимальный контраст (WCAG-like relative luminance difference, 0..1)
-    # Чем больше, тем более контрастные пары; типичные пороги: 0.35..0.6
-    "min_luminance_contrast": 0.35,
-    # Максимум попыток сгенерировать контрастную пару
-    "max_attempts": 50,
-    # Насколько «ярче/темнее» фон относительно текста (в 50% случаев — текст светлее)
-    "dark_text_probability": 0.70,
-    # Диапазон насыщенности цветных пар (HSV)
-    "saturation_range": (0.0, 0.80),
-    # Яркость «светлой» и «тёмной» стороны пары (HSV value)
-    "light_value_range": (0.80, 1.00),
-    "dark_value_range": (0, 0.30),
-    # Диапазон яркости для grayscale (фон светлый, текст тёмный — или наоборот)
-    "grayscale_light_range": (190, 250),
-    "grayscale_dark_range": (5, 70),
+    # Вероятность полностью обесцвеченной пары (чёрно-белая / оттенки серого)
+    "grayscale_probability": 0.15,
+    # Минимальный контраст по стандарту WCAG (1 - неразличимо, 21 - ч/б).
+    # 2.2 - это читаемо человеком, но уже немного «блёкло» или тяжело.
+    # Больше 4.5 - отлично читаемо.
+    "min_contrast_ratio": 2.2,
+    # Максимум попыток подобрать контрастную пару
+    "max_attempts": 100,
 }
 
 RGBA = tuple[int, int, int, int]
@@ -40,12 +31,12 @@ RGB = tuple[int, int, int]
 
 
 # ============================================================
-# 🔬 УТИЛИТЫ
+# 🔬 УТИЛИТЫ КОНТРАСТА (WCAG)
 # ============================================================
 
 
 def _relative_luminance(rgb: RGB) -> float:
-    """Упрощённый расчёт воспринимаемой яркости (0..1)."""
+    """Расчёт воспринимаемой яркости (0..1) по стандарту sRGB."""
     r, g, b = (c / 255.0 for c in rgb)
 
     def _lin(c: float) -> float:
@@ -55,8 +46,12 @@ def _relative_luminance(rgb: RGB) -> float:
 
 
 def _contrast(a: RGB, b: RGB) -> float:
-    la, lb = _relative_luminance(a), _relative_luminance(b)
-    return abs(la - lb)
+    """WCAG Contrast Ratio (1.0 .. 21.0)."""
+    la = _relative_luminance(a)
+    lb = _relative_luminance(b)
+    l1 = max(la, lb)
+    l2 = min(la, lb)
+    return (l1 + 0.05) / (l2 + 0.05)
 
 
 def _hsv_to_rgb(h: float, s: float, v: float) -> RGB:
@@ -71,9 +66,9 @@ def _hsv_to_rgb(h: float, s: float, v: float) -> RGB:
 
 def random_color_pair(rng: random.Random | None = None) -> tuple[RGBA, RGBA]:
     """
-    Возвращает (bg_rgba, text_rgba) — контрастную пару цветов.
-
-    В 30% случаев пара строится в grayscale, в остальных — полноцветная.
+    Возвращает (bg_rgba, text_rgba) — пару цветов всевозможных стилей
+    и оттенков (неоновые, пастельные, тёмные, светлые), прошедших
+    проверку на читаемость (контраст).
     """
     r = rng or random
 
@@ -86,45 +81,89 @@ def random_color_pair(rng: random.Random | None = None) -> tuple[RGBA, RGBA]:
 
 
 def _grayscale_pair(r: random.Random) -> tuple[RGB, RGB]:
-    light = r.randint(*COLOR_CONFIG["grayscale_light_range"])
-    dark = r.randint(*COLOR_CONFIG["grayscale_dark_range"])
-    if r.random() < COLOR_CONFIG["dark_text_probability"]:
-        return (light, light, light), (dark, dark, dark)
-    return (dark, dark, dark), (light, light, light)
+    """Любые случайные оттенки серого с достаточным контрастом."""
+    min_c = COLOR_CONFIG["min_contrast_ratio"]
+    for _ in range(COLOR_CONFIG["max_attempts"]):
+        v1 = r.random()
+        v2 = r.random()
+        bg = (int(v1 * 255), int(v1 * 255), int(v1 * 255))
+        tx = (int(v2 * 255), int(v2 * 255), int(v2 * 255))
+        if _contrast(bg, tx) >= min_c:
+            return bg, tx
+    return (245, 245, 245), (20, 20, 20)
 
 
 def _rgb_pair(r: random.Random) -> tuple[RGB, RGB]:
-    """Генерирует полноцветную пару с нужным контрастом."""
-    min_c = COLOR_CONFIG["min_luminance_contrast"]
+    """
+    Генерирует пару через один из паттернов (пастель, неон, тусклые, монохром),
+    а также полностью случайно, проверяя читаемость по контрасту.
+    """
+    min_c = COLOR_CONFIG["min_contrast_ratio"]
+
+    strategies = [
+        "pure_random",
+        "pastel_vs_dark",
+        "dark_vs_neon",
+        "muted_vs_light",
+        "monochrome_ish",
+        "high_saturation",
+        "faded",
+    ]
 
     for _ in range(COLOR_CONFIG["max_attempts"]):
-        # Золотое сечение для лучшего распределения Hue
-        h1 = r.random()
-        # Для текста выбираем либо контрастный тон (opposite), либо аналогичный
-        h2 = (h1 + r.uniform(0.2, 0.8)) % 1.0
+        mode = r.choice(strategies)
 
-        s1 = r.uniform(*COLOR_CONFIG["saturation_range"])
-        s2 = r.uniform(*COLOR_CONFIG["saturation_range"])
+        if mode == "pure_random":
+            h1, s1, v1 = r.random(), r.random(), r.random()
+            h2, s2, v2 = r.random(), r.random(), r.random()
 
-        # Дополнительная защита: если цвет попадает в "токсичный" зеленый (0.25-0.45),
-        # принудительно снижаем его насыщенность
-        if 0.25 < h1 < 0.45:
-            s1 *= 0.7
-        if 0.25 < h2 < 0.45:
-            s2 *= 0.7
+        elif mode == "pastel_vs_dark":
+            # Пастель (высокая яркость, низкая насыщенность) против тёмного
+            h1, s1, v1 = r.random(), r.uniform(0.1, 0.4), r.uniform(0.8, 1.0)
+            h2, s2, v2 = r.random(), r.random(), r.uniform(0.0, 0.35)
+            if r.random() < 0.5:
+                h1, s1, v1, h2, s2, v2 = h2, s2, v2, h1, s1, v1
 
-        if r.random() < COLOR_CONFIG["dark_text_probability"]:
-            bg_v = r.uniform(*COLOR_CONFIG["light_value_range"])
-            tx_v = r.uniform(*COLOR_CONFIG["dark_value_range"])
-        else:
-            bg_v = r.uniform(*COLOR_CONFIG["dark_value_range"])
-            tx_v = r.uniform(*COLOR_CONFIG["light_value_range"])
+        elif mode == "dark_vs_neon":
+            # Очень тёмный фон и ядовитый неон (или наоборот)
+            h1, s1, v1 = r.random(), r.uniform(0.5, 1.0), r.uniform(0.0, 0.2)
+            h2, s2, v2 = r.random(), r.uniform(0.7, 1.0), r.uniform(0.8, 1.0)
+            if r.random() < 0.5:
+                h1, s1, v1, h2, s2, v2 = h2, s2, v2, h1, s1, v1
 
-        bg = _hsv_to_rgb(h1, s1, bg_v)
-        tx = _hsv_to_rgb(h2, s2, tx_v)
+        elif mode == "muted_vs_light":
+            # Приглушённые средние тона против очень светлых/белых
+            h1, s1, v1 = r.random(), r.uniform(0.1, 0.4), r.uniform(0.3, 0.6)
+            h2, s2, v2 = r.random(), r.uniform(0.0, 0.15), r.uniform(0.85, 1.0)
+            if r.random() < 0.5:
+                h1, s1, v1, h2, s2, v2 = h2, s2, v2, h1, s1, v1
 
+        elif mode == "monochrome_ish":
+            # Один оттенок, но разная яркость/насыщенность
+            base_h = r.random()
+            h1 = base_h
+            h2 = (base_h + r.uniform(-0.05, 0.05)) % 1.0
+            s1, v1 = r.random(), r.random()
+            s2, v2 = r.random(), r.random()
+
+        elif mode == "high_saturation":
+            # Оба цвета насыщенные, но один светлый, а другой тёмный
+            h1, s1, v1 = r.random(), r.uniform(0.7, 1.0), r.uniform(0.8, 1.0)
+            h2, s2, v2 = r.random(), r.uniform(0.7, 1.0), r.uniform(0.1, 0.4)
+            if r.random() < 0.5:
+                h1, s1, v1, h2, s2, v2 = h2, s2, v2, h1, s1, v1
+
+        else:  # "faded"
+            # Блёклые, низкоконтрастные цвета (всё стремится к серому)
+            h1, s1, v1 = r.random(), r.uniform(0.0, 0.3), r.uniform(0.4, 0.8)
+            h2, s2, v2 = r.random(), r.uniform(0.0, 0.3), r.uniform(0.2, 0.9)
+
+        bg = _hsv_to_rgb(h1, s1, v1)
+        tx = _hsv_to_rgb(h2, s2, v2)
+
+        # Если контраст удовлетворяет нашему пониженному порогу - берём
         if _contrast(bg, tx) >= min_c:
             return bg, tx
 
-    # fallback — гарантированно контрастная чёрно-белая пара
+    # Запасной вариант, если за 100 попыток не нашли (почти невозможно)
     return (245, 245, 245), (20, 20, 20)

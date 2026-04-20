@@ -31,7 +31,7 @@ except ImportError:  # pragma: no cover
 AUGMENTATION_CONFIG: dict = {
     "enabled": True,
     # Вероятность применить pipeline к одной капче
-    "apply_probability": 0.9,
+    "apply_probability": 0.70,
     # Индивидуальные вероятности каждой трансформации
     "gaussian_blur_p": 0.25,
     "motion_blur_p": 0.15,
@@ -45,15 +45,15 @@ AUGMENTATION_CONFIG: dict = {
     "color_jitter_p": 0.40,
     "clahe_p": 0.10,
     # Тонкая настройка шумов (по документации)
-    "gauss_noise_std_range": (0.0, 0.12),  # 0-12% от макс. значения 255
+    "gauss_noise_std_range": (0.0, 0.10),
     "iso_noise_color_shift": (0.0, 0.05),
     "iso_noise_intensity": (0.0, 0.4),
     # Downscale (пикселизация) выпилен — превращал капчи в нечитаемые блоки.
     "jpeg_compression_p": 0.25,
     # Параметры трансформаций
-    "gaussian_blur_limit": (3, 5),
-    "motion_blur_limit": (3, 5),
-    "median_blur_limit": (3, 5),
+    "gaussian_blur_limit": (0, 5),
+    "motion_blur_limit": (0, 5),
+    "median_blur_limit": (0, 5),
     "coarse_dropout": {
         "max_holes": 6,
         "max_height": 10,
