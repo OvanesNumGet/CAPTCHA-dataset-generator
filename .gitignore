@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.ruff_cache
+
+# Environment
+.env
+.venv/
+venv/
+
+# Dataset
+dataset/
+*.png
+*.jpg
+
+# Output
+success_accounts.txt
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+fonts
+*.ttf
