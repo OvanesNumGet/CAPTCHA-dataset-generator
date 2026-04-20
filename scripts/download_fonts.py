@@ -87,10 +87,20 @@ def smart_find_and_download(family: str, filename: str) -> tuple[bytes | None, s
 
     return None, ""
 
-def main():
+def main(argv: list[str] | None = None) -> int:
+    """
+    Main entry point. Accepts optional argv for programmatic use.
+    
+    Args:
+        argv: List of command-line arguments (like sys.argv[1:]).
+              If None, uses sys.argv[1:] automatically.
+    
+    Returns:
+        Exit code: 0 on success, 1 on failure.
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument("--dest", default="fonts")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)  # Accept explicit argv for notebook compatibility
 
     dest_dir = Path(args.dest)
     dest_dir.mkdir(parents=True, exist_ok=True)
